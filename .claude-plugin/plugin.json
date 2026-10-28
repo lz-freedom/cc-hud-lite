@@ -1,0 +1,15 @@
+{
+  "name": "cc-hud-lite",
+  "version": "0.1.0",
+  "description": "A light HUD for the Claude Code terminal: a status line under the prompt (context, model, effort, folder and branch, spend limit), a live task list and next-step card, context details, and image previews",
+  "author": {
+    "name": "lz-freedom",
+    "url": "https://github.com/lz-freedom"
+  },
+  "homepage": "https://github.com/lz-freedom/cc-hud-lite",
+  "repository": "https://github.com/lz-freedom/cc-hud-lite",
+  "license": "MIT",
+  "keywords": ["hud", "statusline", "context", "task-list", "images", "claude-code", "mod"],
+  "types": "./types/index.d.ts",
+  "commands": ["./commands/setup.md"]
+}

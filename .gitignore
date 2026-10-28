@@ -1,0 +1,6 @@
+# API types the engine writes when it loads the mod
+.claude-plugin/types/
+
+.DS_Store
+*.log
+node_modules/
