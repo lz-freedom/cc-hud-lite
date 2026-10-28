@@ -110,3 +110,17 @@ claude plugin test ./cc-hud-lite
 ## 许可证
 
 [MIT](LICENSE)
+
+## 社区
+
+- **[linux.do](https://linux.do)** - 一个活跃的开发者社区。
+
+## ⭐ Star 历史
+
+<a href="https://star-history.com/#lz-freedom/cc-hud-lite&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=lz-freedom/cc-hud-lite&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=lz-freedom/cc-hud-lite&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=lz-freedom/cc-hud-lite&type=Date" />
+  </picture>
+</a>
