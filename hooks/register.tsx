@@ -31,6 +31,21 @@ import type {
 
 const PLAN_TOOL = 'mcp__cc-hud-lite__update_plan'
 const WRAP_TOOL = 'mcp__cc-hud-lite__wrap_up'
+
+/** A list once its turn is over: gone when every step is done, kept while any is open. */
+function settle(steps: readonly PlanStep[]): PlanStep[] {
+  return steps.every(one => one.status === 'completed') ? [] : [...steps]
+}
+
+/** The mod's own tools, whose rows the transcript leaves out: the band shows what they did. */
+const QUIET_TOOLS: ReadonlySet<string> = new Set([PLAN_TOOL, WRAP_TOOL])
+
+/** A row drawn as nothing: no cells, no height. */
+function nothing(ui: Ui) {
+  const { Box } = ui
+
+  return <Box display="none" />
+}
 // The full-height view of one image, beside the transcript where the layout docks panes.
 const BIG_PANE = 'cc-hud-lite-bigview'
 // Where the gallery's list sits, and where the status line does, kept across sessions.
@@ -93,7 +108,7 @@ const expanded = atom({ plugin: 'cc-hud-lite', key: 'expanded' } as const, null)
 const meter = atom({ plugin: 'cc-hud-lite', key: 'meter' } as const, null)
 const panel = atom({ plugin: 'cc-hud-lite', key: 'panel' } as const, null)
 const confirm = atom({ plugin: 'cc-hud-lite', key: 'confirm' } as const, null)
-const runtime = atom({ plugin: 'cc-hud-lite', key: 'runtime' } as const, { model: null, effort: null })
+const runtime = atom({ plugin: 'cc-hud-lite', key: 'runtime' } as const, { model: null, effort: null, fast: null })
 const models = atom({ plugin: 'cc-hud-lite', key: 'models' } as const, [])
 const layout = atom({ plugin: 'cc-hud-lite', key: 'layout' } as const, 'left')
 const artwork = atom({ plugin: 'cc-hud-lite', key: 'art' } as const, 0)
@@ -594,6 +609,24 @@ async function refreshEffort($: EngineInterface): Promise<void> {
   const effort = effortLock ?? (typeof persisted === 'string' && persisted !== '' ? persisted : null)
   await update($, runtime, now => ({ ...now, effort: effortLock ?? now.effort ?? effort }))
 }
+
+/**
+ * Whether fast mode is on: from the settings, where the session offers /fast at all. Claude Code
+ * hides /fast where fast mode cannot run (behind a gateway, or with CLAUDE_CODE_DISABLE_FAST_MODE),
+ * and the status line then leaves the item out. No API reads the session's own state: a /fast the
+ * person types is followed by the command hook.
+ */
+async function refreshSpeed($: EngineInterface): Promise<void> {
+  // The list holds hidden commands too: the describe hook below says whether the typeahead offers
+  // /fast. Asking the engine to describe the commands again runs it.
+  $.ui.invalidate('command.describe')
+  await $.command.list().catch(() => [])
+  const saved = fastOffered ? await $.settings.read({ key: 'fastMode' }).catch(() => undefined) : undefined
+  await update($, runtime, now => ({ ...now, fast: fastOffered ? (now.fast ?? saved === true) : null }))
+}
+
+/** Whether Claude Code offers /fast in this session, as its describe hook last answered. */
+let fastOffered = false
 
 function normalizeModel(id: string): string {
   return id.toLowerCase().replace(/\[1m\]$/, '').trim()
@@ -1174,6 +1207,12 @@ async function chooseEffort($: EngineInterface, level: string): Promise<void> {
   void runCommand($, 'effort', level)
 }
 
+async function chooseSpeed($: EngineInterface, isFast: boolean): Promise<void> {
+  await closePanel($)
+  await update($, runtime, now => ({ ...now, fast: isFast }))
+  void runCommand($, 'fast', isFast ? 'on' : 'off')
+}
+
 function compactNow($: EngineInterface): void {
   void runCommand($, 'compact').then(() => refreshContext($).catch(() => undefined))
 }
@@ -1214,7 +1253,7 @@ function pill(ui: Ui, key: string, label: string, tone: Tone, onPress: () => unk
   )
 }
 
-const PANELS: readonly Panel[] = ['context', 'model', 'effort', 'images', 'git']
+const PANELS: readonly Panel[] = ['context', 'model', 'effort', 'speed', 'images', 'git']
 
 function isPanel(value: unknown): value is Panel {
   return PANELS.some(panel => panel === value)
@@ -1254,10 +1293,8 @@ function toolbar(ui: Ui, state: BandState) {
           {
             id: 'context',
             pressable: true,
-            runs: [
-              // Left blank between the brackets: the bar's picture lies over these cells.
-              run(`[${' '.repeat(METER_CELLS)}] ${gauge.percent}%`, word('context')),
-            ],
+            // The bar's picture stands between `[` (drawn before it) and this.
+            runs: [run(`] ${gauge.percent}%`, word('context'))],
           },
         ]),
     { id: 'model', pressable: true, runs: [run(modelLabel(state.now.model, state.choices), word('model'))] },
@@ -1267,6 +1304,9 @@ function toolbar(ui: Ui, state: BandState) {
       runs: [run(`${effortName(state.now.effort ?? 'default')}${effortLock === null ? '' : ' (env)'}`, word('effort'))],
     },
   ]
+  if (state.now.fast !== null) {
+    chips.push({ id: 'speed', pressable: true, runs: [run(state.now.fast ? 'Fast' : 'Standard', word('speed'))] })
+  }
   // The folder and its branch as a shell prompt shows them: `my-project git:(main)`.
   if (git !== null) {
     const folderName = git.cwd.split('/').filter(part => part !== '').pop() ?? git.cwd
@@ -1292,29 +1332,29 @@ function toolbar(ui: Ui, state: BandState) {
   }
 
   const bar = gauge === null ? null : meterPicture(gauge.percent)
+  const opening: Chip[] = [{ id: 'context', pressable: true, runs: [run('[', word('context'))] }]
 
+  // The picture has cells of its own, outside the chips: a surface module repaints all its cells
+  // when its text changes, and text written over a picture's cells wipes the picture.
   return (
     <Box flexDirection="row">
-      <Box>
-        <Client key="chips" module="./chips.tsx" props={{ chips, separator: SEPARATOR }} />
-        {bar !== null && (
-          <Box position="absolute" left={1} top={0}>
-            <Image
-              key="meter"
-              source={{ rgba: bar.rgba, width: bar.width, height: bar.height }}
-              columns={METER_CELLS}
-              rows={1}
-              alt={`${'■'.repeat(filled)}${'·'.repeat(METER_CELLS - filled)}`}
-            />
-          </Box>
-        )}
-        {/* A picture takes no presses: this target over it, drawing nothing, takes them for the chip. */}
-        {bar !== null && (
-          <Box position="absolute" left={1} top={0}>
+      {bar !== null && <Client key="chips-open" module="./chips.tsx" props={{ chips: opening, separator: SEPARATOR }} />}
+      {bar !== null && (
+        <Box width={METER_CELLS} flexShrink={0}>
+          {/* A picture takes no presses: this target under it, drawing nothing, takes them for the chip. */}
+          <Box position="absolute" left={0} top={0}>
             <Client key="meter-hit" module="./hit.tsx" props={{ press: 'context', columns: METER_CELLS, rows: 1 }} />
           </Box>
-        )}
-      </Box>
+          <Image
+            key="meter"
+            source={{ rgba: bar.rgba, width: bar.width, height: bar.height }}
+            columns={METER_CELLS}
+            rows={1}
+            alt={`${'■'.repeat(filled)}${'·'.repeat(METER_CELLS - filled)}`}
+          />
+        </Box>
+      )}
+      <Client key="chips" module="./chips.tsx" props={{ chips, separator: SEPARATOR }} />
     </Box>
   )
 }
@@ -1786,6 +1826,36 @@ function effortPanel($: EngineInterface, ui: Ui, current: string | null) {
   )
 }
 
+/** The speed chip's panel: fast mode off or on, the one in use filled. */
+function speedPanel($: EngineInterface, ui: Ui, current: boolean | null) {
+  const { Box, Button, Text } = ui
+  const levels = [
+    { isFast: false, label: 'Standard' },
+    { isFast: true, label: 'Fast' },
+  ]
+  numbered = levels.map(level => () => chooseSpeed($, level.isFast))
+
+  return sheet(
+    heading('Speed', 'switches with /fast', [], 'close'),
+    <Box flexDirection="row" gap={2}>
+      {levels.map((level, i) => (
+        <Button key={`speed-${i + 1}`} plain onPress={() => chooseSpeed($, level.isFast)}>
+          {level.isFast === current ? (
+            <Text backgroundColor="claude" color="inverseText" bold>
+              {` ${i + 1} ${level.label} `}
+            </Text>
+          ) : (
+            <Text>{` ${i + 1} ${level.label} `}</Text>
+          )}
+        </Button>
+      ))}
+    </Box>,
+    <Text dimColor wrap="wrap">
+      Fast mode answers faster at a higher price, on the models that offer it.
+    </Text>,
+  )
+}
+
 /** The git chip's panel: the directory the session runs in, and where its branch stands. */
 function gitPanel($: EngineInterface, ui: Ui, info: GitInfo | null) {
   const { Box, Text } = ui
@@ -2038,6 +2108,7 @@ export const register: Register = on => {
       const quietly = () => undefined
       await refreshModel($).catch(quietly)
       await refreshEffort($).catch(quietly)
+      await refreshSpeed($).catch(quietly)
       await refreshModels($).catch(quietly)
       await refreshLayout($).catch(quietly)
       await refreshUsage($).catch(quietly)
@@ -2078,10 +2149,12 @@ export const register: Register = on => {
     return { sections: [...composed.sections, { id: 'cc-hud-lite:workflow', text: WORKFLOW, scope: 'session' as const }] }
   })
 
-  // A new prompt of the person's starts a fresh list and takes the old card and panel away.
+  // A new prompt takes the old card and panel away, and a finished list. A list with steps still open
+  // stays: a goal's next round, a background agent's report or a reply mid-task carry the same work on,
+  // and a new task's first update_plan replaces it.
   on('turn.start', async ($, e, next) => {
     if (isActive && e.agentId === undefined && e.text !== '') {
-      await update($, plan, () => [])
+      await update($, plan, settle)
       await update($, card, () => null)
       await update($, panel, () => null)
       await update($, confirm, () => null)
@@ -2099,7 +2172,7 @@ export const register: Register = on => {
     if (isActive && e.agentId === undefined) {
       const effort = e.effort === undefined ? null : String(e.effort)
       void read($, runtime)
-        .then(now => (now.model === e.model && now.effort === effort ? undefined : update($, runtime, () => ({ model: e.model, effort }))))
+        .then(now => (now.model === e.model && now.effort === effort ? undefined : update($, runtime, now2 => ({ ...now2, model: e.model, effort }))))
         .catch(() => undefined)
     }
 
@@ -2171,9 +2244,10 @@ export const register: Register = on => {
     const ask = typeof input.ask === 'string' && input.ask.trim() !== '' ? input.ask.trim() : null
     const actions = ask === null ? [] : readActions(input.actions)
     if (actions.length === 0) {
-      // Nothing for the person to press: the closing message says it all, so no card and no list stay up.
+      // Nothing for the person to press: the closing message says it all, so no card stays up, and a
+      // finished list goes with it. One with steps still open stays: the work goes on.
       await update($, card, () => null)
-      await update($, plan, () => [])
+      await update($, plan, settle)
 
       return {
         result: 'Nothing is drawn: there is no choice to offer. Write your closing message now: your full answer, the last thing you say this turn.',
@@ -2245,6 +2319,34 @@ export const register: Register = on => {
     return ran
   }).catch(($, e, next) => next(e))
 
+  on('command.describe', { command: 'fast' }, async ($, e, next) => {
+    const described = await next(e)
+    const isOffered = !described.isHidden
+    if (isOffered !== fastOffered) {
+      fastOffered = isOffered
+      if (isActive) {
+        await refreshSpeed($).catch(() => undefined)
+      }
+    }
+
+    return described
+  }).catch(($, e, next) => next(e))
+
+  // /fast on|off sets fast mode, a bare /fast asks: the settings say what it chose. Turning it on may
+  // switch the model, so that is read again too.
+  on('command.run', { command: 'fast' }, async ($, e, next) => {
+    const ran = await next(e)
+    if (isActive) {
+      const asked = e.args.trim().split(/\s+/)[0] ?? ''
+      const saved = await $.settings.read({ key: 'fastMode' }).catch(() => undefined)
+      const fast = asked === 'on' ? true : asked === 'off' ? false : saved === true
+      const model = await $.session.model().catch(() => null)
+      await update($, runtime, now => ({ ...now, fast: now.fast === null ? null : fast, model: model ?? now.model }))
+    }
+
+    return ran
+  }).catch(($, e, next) => next(e))
+
   on('command.run', { command: 'toolbar' }, async ($, e) => {
     const asked = e.args.trim()
     const where: ToolbarPlace =
@@ -2283,7 +2385,7 @@ export const register: Register = on => {
 
       return {}
     }
-    if ((e.element !== 'chips' && e.element !== 'meter-hit') || !isPanel(press)) {
+    if ((e.element !== 'chips' && e.element !== 'chips-open' && e.element !== 'meter-hit') || !isPanel(press)) {
       return next(e)
     }
     await togglePanel($, press)
@@ -2327,6 +2429,8 @@ export const register: Register = on => {
       body = modelPanel($, ui, state.choices, state.now.model, room)
     } else if (state.open === 'effort') {
       body = effortPanel($, ui, state.now.effort)
+    } else if (state.open === 'speed') {
+      body = speedPanel($, ui, state.now.fast)
     } else if (state.open === 'git') {
       body = gitPanel($, ui, state.git)
     } else if (state.open === 'images') {
@@ -2398,7 +2502,18 @@ export const register: Register = on => {
   })
 
   // The transcript keeps each image beside the row that made it, as the desktop app does.
+  on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
+    if (isActive && e.surface === 'terminal' && QUIET_TOOLS.has(e.props.tool)) {
+      return nothing($.ui.resolve(e))
+    }
+
+    return next(e)
+  })
+
   on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
+    if (isActive && e.surface === 'terminal' && e.props.calls.every(call => QUIET_TOOLS.has(call.tool))) {
+      return nothing($.ui.resolve(e))
+    }
     const drawn = await next(e)
     const group = e.props.calls
     if (!isActive || e.surface !== 'terminal' || e.props.isExpanded || !group.some(call => mayHoldImages(call.tool))) {
@@ -2410,7 +2525,12 @@ export const register: Register = on => {
     return list.length === 0 ? drawn : withStrip($, $.ui.resolve(e), drawn, list)
   })
 
+  // The task list and the card are drawn above the prompt: their calls and results add nothing to the
+  // transcript.
   on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
+    if (isActive && e.surface === 'terminal' && QUIET_TOOLS.has(e.props.tool)) {
+      return nothing($.ui.resolve(e))
+    }
     const drawn = await next(e)
     if (!isActive || e.surface !== 'terminal' || !mayHoldImages(e.props.tool)) {
       return drawn

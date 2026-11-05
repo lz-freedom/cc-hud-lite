@@ -275,20 +275,25 @@ test('wrap_up shows the card, and a button sends its reply', async ($, on) => {
   await band.unmount()
 })
 
-test('wrap_up without buttons draws no card, and the finished list goes too', async ($, on) => {
+test('wrap_up without buttons draws no card; a finished list goes, an open one stays', async ($, on) => {
   engine(on)
   await $.session.start(TERMINAL)
   await $.tool.call({ tool: PLAN_TOOL, items: [{ content: 'Check it', status: 'in_progress' }] })
-  const done = await $.tool.call({ tool: WRAP_TOOL, recap: 'Searched and showed the results.' })
-  expect(done.result ?? done.text ?? '').toContain('Nothing is drawn')
+  const early = await $.tool.call({ tool: WRAP_TOOL, recap: 'Started; an agent is still searching.' })
+  expect(early.result ?? early.text ?? '').toContain('Nothing is drawn')
 
   const band = await $.ui.mount({ ...IDLE, surface: 'terminal' })
   expect(await band.find({ type: 'Markdown' })).toBeUndefined()
+  // A step still open: the work goes on, so the list stays.
+  expect(await band.find({ type: 'Text', text: 'Check it' })).toBeDefined()
+
+  await $.tool.call({ tool: PLAN_TOOL, items: [{ content: 'Check it', status: 'completed' }] })
+  await $.tool.call({ tool: WRAP_TOOL, recap: 'Searched and showed the results.' })
   expect(await band.find({ type: 'Text', text: 'Check it' })).toBeUndefined()
   await band.unmount()
 })
 
-test('a new prompt clears the list, the card and an open panel', async ($, on) => {
+test('a new prompt clears the card, an open panel and a finished list', async ($, on) => {
   engine(on)
   await $.session.start(TERMINAL)
   await $.tool.call({ tool: PLAN_TOOL, items: [{ content: 'One', status: 'in_progress' }] })
@@ -304,8 +309,12 @@ test('a new prompt clears the list, the card and an open panel', async ($, on) =
   expect(await band.find({ type: 'Text', text: 'Effort' })).toBeUndefined()
   await line.post({ press: 'effort' }, CHIPS)
 
+  // A step still open carries on past the new prompt; once all are done, the next prompt clears them.
   await $.turn.start({ text: 'next question', turnId: 't2' })
   expect(await band.find({ type: 'Text', text: 'Effort' })).toBeUndefined()
+  expect(await band.find({ type: 'Text', text: 'One' })).toBeDefined()
+  await $.tool.call({ tool: PLAN_TOOL, items: [{ content: 'One', status: 'completed' }] })
+  await $.turn.start({ text: 'another question', turnId: 't3' })
   expect(await band.find({ type: 'Text', text: 'One' })).toBeUndefined()
   await line.unmount()
   await band.unmount()
@@ -322,8 +331,9 @@ test('the context chip shows the meter and opens the details, with compact and c
 
   const band = await $.ui.mount({ ...IDLE, surface: 'terminal' })
   const line = await $.ui.mount({ ...HINT, surface: 'terminal' })
-  // The bar is a picture laid over blank cells of the chip: 47% fills half of it.
-  expect((await line.find({ key: 'chip-context', ...CHIPS }))?.text).toBe(`[${' '.repeat(12)}] 47%`)
+  // The bar is a picture in cells of its own between `[` and `] 47%`, never under the chips' text.
+  expect((await line.find({ key: 'chip-context', in: 'chips-open' }))?.text).toBe('[')
+  expect((await line.find({ key: 'chip-context', ...CHIPS }))?.text).toBe('] 47%')
   const bar = await line.find({ type: 'Image', key: 'meter' })
   expect(bar?.props.alt).toBe('■■■■■■······')
   expect(bar?.props.source).toMatchObject({ width: 192, height: 36 })
@@ -356,10 +366,10 @@ test('the model chip lists the picker and switches by /model', async ($, on) => 
   const line = await $.ui.mount({ ...HINT, surface: 'terminal' })
   expect((await line.find({ key: 'chip-model', ...CHIPS }))?.text).toBe('Opus 5.5')
 
-  // The context chip takes cells 0 to 17, then the ' | ' between items; the model chip starts at 21.
-  await line.pointer({ type: 'down', x: 19, y: 0, button: 'left', ...CHIPS })
+  // The context chip's `] 47%` takes cells 0 to 4, then the ' | ' between items; the model chip starts at 8.
+  await line.pointer({ type: 'down', x: 6, y: 0, button: 'left', ...CHIPS })
   expect(await band.find({ type: 'Text', text: 'Model' })).toBeUndefined()
-  await line.pointer({ type: 'down', x: 22, y: 0, button: 'left', ...CHIPS })
+  await line.pointer({ type: 'down', x: 9, y: 0, button: 'left', ...CHIPS })
   expect((await band.find({ type: 'Button', key: 'model-2' }))?.text).toContain('Claude Sonnet 5.5')
 
   await band.press({ key: 'model-2' })
@@ -752,5 +762,30 @@ test('outside a terminal session it registers nothing and leaves the band alone'
 
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
   expect((await band.find({ type: 'Text', text: 'engine' }))?.text).toBe('engine')
+  await band.unmount()
+})
+
+test('the speed item shows only where Claude Code offers /fast, and switches fast mode', async ($, on) => {
+  const { seen } = engine(on)
+  // Core's describe answers what it was asked; ui.invalidate has nothing to drop in the test engine.
+  on('command.describe', (_, e) => ({ ...e }) as never)
+  on('ui.invalidate', () => ({ value: undefined }) as never)
+  await $.session.start(TERMINAL)
+  const band = await $.ui.mount({ ...IDLE, surface: 'terminal' })
+  const line = await $.ui.mount({ ...HINT, surface: 'terminal' })
+  const describe = (isHidden: boolean) =>
+    $.command.describe({ command: 'fast', description: 'Toggle fast mode', isHidden, immediate: true, provider: { kind: 'core' } } as never)
+  // Behind a gateway Claude Code hides /fast: no item.
+  await describe(true)
+  expect(await line.find({ key: 'chip-speed', ...CHIPS })).toBeUndefined()
+
+  await describe(false)
+  expect((await line.find({ key: 'chip-speed', ...CHIPS }))?.text).toBe('Standard')
+  await line.post({ press: 'speed' }, CHIPS)
+  expect((await band.find({ type: 'Text', text: 'Speed' }))?.text).toBe('Speed')
+  await band.press({ key: 'speed-2' })
+  expect(seen.ran).toContain('fast on')
+  expect((await line.find({ key: 'chip-speed', ...CHIPS }))?.text).toBe('Fast')
+  await line.unmount()
   await band.unmount()
 })

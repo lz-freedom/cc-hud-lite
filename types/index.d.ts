@@ -38,10 +38,15 @@ export type ContextView = {
 export type Meter = { tokens: number; window: number; percent: number }
 
 /** Which detail the band shows above its toolbar. */
-export type Panel = 'context' | 'model' | 'effort' | 'images' | 'git'
+export type Panel = 'context' | 'model' | 'effort' | 'speed' | 'images' | 'git'
 
 /** The model and effort the main loop last asked with. */
-export type Runtime = { model: string | null; effort: string | null }
+export type Runtime = {
+  model: string | null
+  effort: string | null
+  /** Fast mode on or off; null where the session offers no /fast (a gateway, or switched off). */
+  fast: boolean | null
+}
 
 /** A model the picker offers: settings' modelPicker, or the aliases. */
 export type ModelChoice = { model: string; label: string; detail: string }

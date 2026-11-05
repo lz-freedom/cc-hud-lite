@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1 (2026-11-05)
+
+- The task list stays up while any step is open: a `wrap_up` without buttons, a goal's next round or a background agent's report no longer takes it away. A finished list still goes.
+- `update_plan` and `wrap_up` calls and their results are left out of the transcript: the band above the prompt shows them.
+- The context bar has cells of its own in the status line, so the line's text no longer wipes the picture.
+- A speed item (`Standard` / `Fast`) and panel switch fast mode with `/fast`, where Claude Code offers it.
+
 ## 0.1.0 (2026-10-28)
 
 First release.
