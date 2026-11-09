@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3 (2026-11-09)
+
+- `wrap_up` takes the task list away even when steps were never ticked off, as the desktop app does: a model that skipped `advance` no longer leaves a step spinning after the turn is done. Work that goes on starts a new list with `update_plan`.
+
 ## 0.1.2 (2026-11-07)
 
 - The context bar shows from the first response of a session, also mid-turn: it no longer waits for the turn to end where a plugin seated before this one keeps `session.measure` to itself.
