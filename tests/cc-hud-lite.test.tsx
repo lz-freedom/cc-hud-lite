@@ -102,6 +102,9 @@ const USAGE = {
  * What a session answers beneath the mod, with what the mod asked of it; `env` is its process
  * environment and `settings` what its settings hold besides the picker and effortLevel.
  */
+/** What /fast answers in the test engine. */
+const fastAnswer = { text: 'Fast mode ON' }
+
 function engine(on: On, env: Record<string, string> = {}, settings: Record<string, unknown> = {}, usage: SessionUsage = USAGE) {
   const seen = {
     tools: [] as string[],
@@ -142,7 +145,7 @@ function engine(on: On, env: Record<string, string> = {}, settings: Record<strin
       model = e.args
     }
 
-    return { text: '' }
+    return { text: e.command === 'fast' ? fastAnswer.text : '' }
   })
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('session.measure', (_, e) => ({ changed: e.changed }))
@@ -786,6 +789,13 @@ test('the speed item shows only where Claude Code offers /fast, and switches fas
   await band.press({ key: 'speed-2' })
   expect(seen.ran).toContain('fast on')
   expect((await line.find({ key: 'chip-speed', ...CHIPS }))?.text).toBe('Fast')
+
+  // Where the account or gateway cannot run it, /fast says so, and the item goes for the session.
+  fastAnswer.text = 'Fast mode unavailable: Fast mode is currently unavailable'
+  await $.command.run({ command: 'fast', args: 'on', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } })
+  expect(await line.find({ key: 'chip-speed', ...CHIPS })).toBeUndefined()
+  await describe(false)
+  expect(await line.find({ key: 'chip-speed', ...CHIPS })).toBeUndefined()
   await line.unmount()
   await band.unmount()
 })

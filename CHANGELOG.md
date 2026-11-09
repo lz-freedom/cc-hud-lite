@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2 (2026-11-07)
+
+- The context bar shows from the first response of a session, also mid-turn: it no longer waits for the turn to end where a plugin seated before this one keeps `session.measure` to itself.
+- Starting a session no longer waits on the command list, which could hold up the context, model list and usage reads.
+- The speed item goes away for the session once `/fast` answers that fast mode is unavailable (a gateway or an account without it).
+
 ## 0.1.1 (2026-11-05)
 
 - The task list stays up while any step is open: a `wrap_up` without buttons, a goal's next round or a background agent's report no longer takes it away. A finished list still goes.

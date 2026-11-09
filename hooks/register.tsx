@@ -617,16 +617,15 @@ async function refreshEffort($: EngineInterface): Promise<void> {
  * person types is followed by the command hook.
  */
 async function refreshSpeed($: EngineInterface): Promise<void> {
-  // The list holds hidden commands too: the describe hook below says whether the typeahead offers
-  // /fast. Asking the engine to describe the commands again runs it.
-  $.ui.invalidate('command.describe')
-  await $.command.list().catch(() => [])
   const saved = fastOffered ? await $.settings.read({ key: 'fastMode' }).catch(() => undefined) : undefined
   await update($, runtime, now => ({ ...now, fast: fastOffered ? (now.fast ?? saved === true) : null }))
 }
 
 /** Whether Claude Code offers /fast in this session, as its describe hook last answered. */
 let fastOffered = false
+
+/** Set once /fast answers that fast mode is unavailable: the item stays away for the session. */
+let fastRefused = false
 
 function normalizeModel(id: string): string {
   return id.toLowerCase().replace(/\[1m\]$/, '').trim()
@@ -2108,12 +2107,16 @@ export const register: Register = on => {
       const quietly = () => undefined
       await refreshModel($).catch(quietly)
       await refreshEffort($).catch(quietly)
-      await refreshSpeed($).catch(quietly)
       await refreshModels($).catch(quietly)
       await refreshLayout($).catch(quietly)
       await refreshUsage($).catch(quietly)
       home = (await $.env.get('HOME').catch(quietly)) ?? null
       await refreshGit($).catch(quietly)
+      // Whether /fast is offered comes from its describe hook: asking the engine to describe the
+      // commands again runs it. Never awaited here: describing reads the commands, which may wait
+      // for this start to finish.
+      $.ui.invalidate('command.describe')
+      void $.command.list().catch(quietly)
     }
 
     return next(e)
@@ -2175,8 +2178,14 @@ export const register: Register = on => {
         .then(now => (now.model === e.model && now.effort === effort ? undefined : update($, runtime, now2 => ({ ...now2, model: e.model, effort }))))
         .catch(() => undefined)
     }
+    const stepped = yield* next(e)
+    // Each response moves the context: read it now, not only at the turn's end. session.measure says
+    // so too, but a plugin seated before this one may not pass that event on.
+    if (isActive && e.agentId === undefined) {
+      void refreshUsage($).catch(() => undefined)
+    }
 
-    return yield* next(e)
+    return stepped
   })
 
   on('turn.complete', async ($, e, next) => {
@@ -2321,11 +2330,11 @@ export const register: Register = on => {
 
   on('command.describe', { command: 'fast' }, async ($, e, next) => {
     const described = await next(e)
-    const isOffered = !described.isHidden
+    const isOffered = !described.isHidden && !fastRefused
     if (isOffered !== fastOffered) {
       fastOffered = isOffered
       if (isActive) {
-        await refreshSpeed($).catch(() => undefined)
+        void refreshSpeed($).catch(() => undefined)
       }
     }
 
@@ -2338,6 +2347,14 @@ export const register: Register = on => {
     const ran = await next(e)
     if (isActive) {
       const asked = e.args.trim().split(/\s+/)[0] ?? ''
+      // `Fast mode unavailable: …`: the account or the gateway cannot run it, so no item offers it.
+      if (/unavailable/i.test(ran.text ?? '')) {
+        fastOffered = false
+        fastRefused = true
+        await update($, runtime, now => ({ ...now, fast: null }))
+
+        return ran
+      }
       const saved = await $.settings.read({ key: 'fastMode' }).catch(() => undefined)
       const fast = asked === 'on' ? true : asked === 'off' ? false : saved === true
       const model = await $.session.model().catch(() => null)
