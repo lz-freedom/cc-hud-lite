@@ -2253,10 +2253,11 @@ export const register: Register = on => {
     const ask = typeof input.ask === 'string' && input.ask.trim() !== '' ? input.ask.trim() : null
     const actions = ask === null ? [] : readActions(input.actions)
     if (actions.length === 0) {
-      // Nothing for the person to press: the closing message says it all, so no card stays up, and a
-      // finished list goes with it. One with steps still open stays: the work goes on.
+      // Nothing for the person to press: the closing message says it all, so no card stays up. wrap_up
+      // means the turn's work is done, so the list goes too, even with steps the model never ticked
+      // off (as in the desktop app); work that goes on starts a new list with update_plan.
       await update($, card, () => null)
-      await update($, plan, settle)
+      await update($, plan, () => [])
 
       return {
         result: 'Nothing is drawn: there is no choice to offer. Write your closing message now: your full answer, the last thing you say this turn.',

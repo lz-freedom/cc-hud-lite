@@ -278,20 +278,17 @@ test('wrap_up shows the card, and a button sends its reply', async ($, on) => {
   await band.unmount()
 })
 
-test('wrap_up without buttons draws no card; a finished list goes, an open one stays', async ($, on) => {
+test('wrap_up without buttons draws no card and takes the list away, open steps too', async ($, on) => {
   engine(on)
   await $.session.start(TERMINAL)
   await $.tool.call({ tool: PLAN_TOOL, items: [{ content: 'Check it', status: 'in_progress' }] })
-  const early = await $.tool.call({ tool: WRAP_TOOL, recap: 'Started; an agent is still searching.' })
-  expect(early.result ?? early.text ?? '').toContain('Nothing is drawn')
-
   const band = await $.ui.mount({ ...IDLE, surface: 'terminal' })
-  expect(await band.find({ type: 'Markdown' })).toBeUndefined()
-  // A step still open: the work goes on, so the list stays.
   expect(await band.find({ type: 'Text', text: 'Check it' })).toBeDefined()
 
-  await $.tool.call({ tool: PLAN_TOOL, items: [{ content: 'Check it', status: 'completed' }] })
-  await $.tool.call({ tool: WRAP_TOOL, recap: 'Searched and showed the results.' })
+  // The model never ticked the step off, but wrap_up says the turn is done: no spinner left behind.
+  const done = await $.tool.call({ tool: WRAP_TOOL, recap: 'Searched and showed the results.' })
+  expect(done.result ?? done.text ?? '').toContain('Nothing is drawn')
+  expect(await band.find({ type: 'Markdown' })).toBeUndefined()
   expect(await band.find({ type: 'Text', text: 'Check it' })).toBeUndefined()
   await band.unmount()
 })
