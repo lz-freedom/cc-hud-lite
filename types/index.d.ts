@@ -98,6 +98,8 @@ declare module 'claude-code' {
       confirm: string | null
       runtime: Runtime
       models: ModelChoice[]
+      /** The model panel's page, from 0; null: the page that holds the current model. */
+      modelPage: number | null
       layout: GalleryLayout
       git: GitInfo | null
       spend: SpendLimit | null

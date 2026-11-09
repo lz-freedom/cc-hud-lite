@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.4 (2026-11-09)
+
+- The model panel turns pages when the picker lists more models than fit: `‹ ›` and a page count in its heading, the digits pick on the page shown, and it opens on the page of the model in use. Before, models past the ninth could not be reached.
+
 ## 0.1.3 (2026-11-09)
 
 - `wrap_up` takes the task list away even when steps were never ticked off, as the desktop app does: a model that skipped `advance` no longer leaves a step spinning after the turn is done. Work that goes on starts a new list with `update_plan`.

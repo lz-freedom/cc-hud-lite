@@ -420,6 +420,32 @@ test('before any reading the status line leaves the context out, bar and all', a
   await band.unmount()
 })
 
+test('more models than one page holds turn over with ‹ ›, and the digits pick on the page shown', async ($, on) => {
+  const options = Array.from({ length: 12 }, (_, i) => ({ model: `gateway/m-${i + 1}`, label: `Model ${i + 1} · gateway` }))
+  const { seen } = engine(on, {}, { modelPicker: { options } })
+  await $.session.start(TERMINAL)
+  const band = await $.ui.mount({ ...IDLE, surface: 'terminal' })
+  const line = await $.ui.mount({ ...HINT, surface: 'terminal' })
+  await line.pointer({ type: 'down', x: 9, y: 0, button: 'left', ...CHIPS })
+  expect((await band.find({ type: 'Button', key: 'model-1' }))?.text).toContain('Model 1 ')
+  expect(await band.find({ type: 'Text', text: /Model 10/ })).toBeUndefined()
+  expect(await band.find({ type: 'Text', text: /1\/2/ })).toBeDefined()
+
+  await band.press({ key: 'model-next' })
+  expect((await band.find({ type: 'Button', key: 'model-3' }))?.text).toContain('Model 12')
+  expect(await band.find({ type: 'Text', text: /2\/2/ })).toBeDefined()
+  await ($.prompt as unknown as { edit: (e: object) => Promise<unknown> }).edit({ inputText: '2', text: '' })
+  expect(seen.ran).toContain('model gateway/m-11')
+
+  // Picking closes the panel; it opens again on the page of the model now in use.
+  await line.pointer({ type: 'down', x: 9, y: 0, button: 'left', ...CHIPS })
+  expect(await band.find({ type: 'Text', text: /2\/2/ })).toBeDefined()
+  await band.press({ key: 'model-prev' })
+  expect((await band.find({ type: 'Button', key: 'model-1' }))?.text).toContain('Model 1 ')
+  await line.unmount()
+  await band.unmount()
+})
+
 test('a gateway model id outside the picker shows by its Claude family and version', async ($, on) => {
   engine(on)
   await $.session.start(TERMINAL)

@@ -110,6 +110,7 @@ const panel = atom({ plugin: 'cc-hud-lite', key: 'panel' } as const, null)
 const confirm = atom({ plugin: 'cc-hud-lite', key: 'confirm' } as const, null)
 const runtime = atom({ plugin: 'cc-hud-lite', key: 'runtime' } as const, { model: null, effort: null, fast: null })
 const models = atom({ plugin: 'cc-hud-lite', key: 'models' } as const, [])
+const modelPage = atom({ plugin: 'cc-hud-lite', key: 'modelPage' } as const, null)
 const layout = atom({ plugin: 'cc-hud-lite', key: 'layout' } as const, 'left')
 const artwork = atom({ plugin: 'cc-hud-lite', key: 'art' } as const, 0)
 const gitInfo = atom({ plugin: 'cc-hud-lite', key: 'git' } as const, null)
@@ -1082,6 +1083,7 @@ async function togglePanel($: EngineInterface, which: Panel): Promise<void> {
     await refreshContext($)
   }
   if (next === 'model') {
+    await update($, modelPage, () => null)
     await refreshModels($)
   }
   if (next === 'git') {
@@ -1754,18 +1756,35 @@ function contextPanel(
   )
 }
 
-function modelPanel($: EngineInterface, ui: Ui, choices: readonly ModelChoice[], current: string | null, room: number) {
+function modelPanel(
+  $: EngineInterface,
+  ui: Ui,
+  choices: readonly ModelChoice[],
+  current: string | null,
+  room: number,
+  asked: number | null,
+) {
   const { Button, Text } = ui
   const now = current === null ? null : normalizeModel(current)
-  // The frame, its heading in the top edge, takes two rows; the current model always shows.
+  // The frame, its heading in the top edge, takes two rows. A page holds what the rows allow, up to
+  // the nine the digits reach; ‹ › in the heading turn the pages, and a panel opens on the current model's.
   const cap = Math.max(1, Math.min(9, room - 2))
+  const pages = Math.max(1, Math.ceil(choices.length / cap))
   const at = choices.findIndex(choice => normalizeModel(choice.model) === now)
-  const shown = at >= cap ? [...choices.slice(0, cap - 1), ...choices.slice(at, at + 1)] : choices.slice(0, cap)
-  const nameWidth = Math.min(30, Math.max(0, ...shown.map(choice => choice.label.length)) + 2)
+  const page = Math.min(pages - 1, Math.max(0, asked ?? (at < 0 ? 0 : Math.floor(at / cap))))
+  const first = page * cap
+  const shown = choices.slice(first, first + cap)
+  const nameWidth = Math.min(30, Math.max(0, ...choices.map(choice => choice.label.length)) + 2)
   numbered = shown.map(choice => () => chooseModel($, choice))
+  const turn = (to: number) => () => update($, modelPage, () => (to + pages) % pages)
+  const controls =
+    pages > 1
+      ? [iconButton(ui, 'model-prev', '‹', null, turn(page - 1)), iconButton(ui, 'model-next', '›', null, turn(page + 1))]
+      : []
+  const note = pages > 1 ? `${page + 1}/${pages} · switches with /model` : 'switches with /model'
 
   return sheet(
-    heading('Model', 'switches with /model', [], 'close' as const),
+    heading('Model', note, controls, 'close' as const),
     ...shown.map((choice, i) => {
       const isCurrent = normalizeModel(choice.model) === now
 
@@ -2444,7 +2463,7 @@ export const register: Register = on => {
     if (state.open === 'context') {
       body = contextPanel($, ui, await read($, context), await read($, expanded), await read($, confirm), width, room)
     } else if (state.open === 'model') {
-      body = modelPanel($, ui, state.choices, state.now.model, room)
+      body = modelPanel($, ui, state.choices, state.now.model, room, await read($, modelPage))
     } else if (state.open === 'effort') {
       body = effortPanel($, ui, state.now.effort)
     } else if (state.open === 'speed') {
